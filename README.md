@@ -14,7 +14,7 @@ Visit https://ulucode.com/random/webgputests/linked/ to play!
 Requires a browser with WebGPU support.
 
 ## Where to look 
-The important code, regarding TSL [/src/lib/elements/LinkedParticles.ts](https://github.com/ULuIQ12/webgpu-tsl-linkedparticles/blob/main/src/lib/elements/LinedParticles.ts)
+The important code, regarding TSL [/src/lib/elements/LinkedParticles.ts](https://github.com/ULuIQ12/webgpu-tsl-linkedparticles/blob/main/src/lib/elements/LinkedParticles.ts)
 The file is commented and uses mostly descriptive variable names.
 
 
