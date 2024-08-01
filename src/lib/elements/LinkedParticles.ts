@@ -1,9 +1,9 @@
 
-// @ts-nocheckqsdqsd
+// @ts-nocheck
 import { Pointer } from "../utils/Pointer";
 import { IAnimatedElement } from "../interfaces/IAnimatedElement";
-import { color, loop, Continue, cond, float, If, instanceIndex, int, min, mix, mx_fractal_noise_float, SpriteNodeMaterial, storage, StorageBufferAttribute, StorageInstancedBufferAttribute, timerDelta, tslFn, uniform, uv, vec3, WebGPURenderer, vec2, sin, cos, MeshStandardNodeMaterial, PI2, gain, timerLocal, step, smoothstep, abs, sub, mul, normalView, normalLocal, normalGeometry, texture, atan2, PI, positionLocal, max, MeshSSSPhysicalNodeMaterial, pow, RGBA_ASTC_4x4_Format, MultiplyBlending, positionWorld, discard, Uint16BufferAttribute, StreamReadUsage, Uint32BufferAttribute, storageObject, mx_fractal_noise_vec3, AdditiveBlending, MeshBasicNodeMaterial, DoubleSide, positionGeometry, varying, clamp, sign, dot, length, MathUtils, timerGlobal, BackSide, acos, fract, mx_worley_noise_float, floor, add, mod, vec4, pcurve, PostProcessing, pass, bloom, rgbShift, viewportTopLeft, Float32BufferAttribute, ShaderNodeObject, StorageBufferNode, Vector2, ACESFilmicToneMapping, cameraPosition } from "three/webgpu";
-import { AmbientLight, BufferGeometry, Color, DirectionalLight, DirectionalLightHelper, DirectionalLightShadow, DynamicDrawUsage, EquirectangularReflectionMapping, Group, IcosahedronGeometry, InstancedMesh, Mesh, MeshBasicMaterial, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, Plane, PlaneGeometry, RepeatWrapping, Scene, SpotLight, TextureLoader, Vector3 } from "three/webgpu";
+import { color, loop, float, If, instanceIndex, min, mix, mx_fractal_noise_float, SpriteNodeMaterial, storage, StorageBufferAttribute, StorageInstancedBufferAttribute, timerDelta, tslFn, uniform, uv, vec3, WebGPURenderer, vec2, sin, cos, PI2, step, smoothstep, abs, sub, mul, atan2, PI, max, positionWorld, mx_fractal_noise_vec3, AdditiveBlending, MeshBasicNodeMaterial, DoubleSide, varying, clamp, sign, dot, length, MathUtils, timerGlobal, BackSide, acos, fract, floor, mod, pcurve, PostProcessing, pass, bloom, rgbShift, viewportTopLeft, Float32BufferAttribute, ShaderNodeObject, StorageBufferNode, Vector2, ACESFilmicToneMapping, cameraPosition } from "three/webgpu";
+import { BufferGeometry, DynamicDrawUsage, IcosahedronGeometry, InstancedMesh, Mesh, PerspectiveCamera, Plane, PlaneGeometry, Scene, Vector3 } from "three/webgpu";
 import GUI from "three/examples/jsm/libs/lil-gui.module.min.js";
 import { Root } from "../Root";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -46,16 +46,16 @@ export class LinkedParticles implements IAnimatedElement {
 
 		this.gui = new GUI();
 		this.gui.domElement.style.left = "8px"; // windows capture is over it when on the right side
-		
+
 	}
 
 	async init() {
 
 		Root.registerAnimatedElement(this); // this.just add this instance to the list of animated elements in the root class so that update is called on each frame
-		await this.initParticles(); 
-		await this.initLinks(); 
+		await this.initParticles();
+		await this.initLinks();
 		this.initPost();
-		this.initBG();
+		this.createBackground();
 		this.initGUI();
 	}
 
@@ -79,7 +79,7 @@ export class LinkedParticles implements IAnimatedElement {
 	turbOctaves = uniform(2);
 	turbLacunarity = uniform(2.0);
 	turbGain = uniform(0.5);
-	turbFriction = uniform(0.02);
+	turbFriction = uniform(0.01);
 
 	uCamFadeThreshold = uniform(3.0 * 3.0); // squared dist
 
@@ -113,7 +113,6 @@ export class LinkedParticles implements IAnimatedElement {
 
 	}
 
-
 	// starts to slow down at 32768 particles on my machine, you might have better luck. But it's doesn't really need more, the effect works well at 16384 or less
 	nbParticles: number = Math.pow(2, 14); // 10:1024, 11:2048, 12:4096, 13:8192, 14:16384, 15:32768, 16:65536
 	partPositions: ShaderNodeObject<StorageBufferNode>;
@@ -141,7 +140,7 @@ export class LinkedParticles implements IAnimatedElement {
 			const pulse = pcurve(sin(timerGlobal(5.0).add(instanceIndex.toFloat().mul(0.1))).mul(0.5).add(0.5), 0.5, 0.5).mul(10).add(1.0);
 			return col.mul(pulse).mul(modLife);
 		})();
-		
+
 		partMat.opacityNode = tslFn(() => {
 			//const circle = uv().xy.sub(.5).length().sub(.5);
 			const hex = this.sdHexagon(uv().xy.sub(.5), .5);
@@ -153,14 +152,14 @@ export class LinkedParticles implements IAnimatedElement {
 			});
 			return max(0.0, step(0.0, hex).oneMinus().mul(life)).mul(camFac); // opacity decreases over lifetime
 		})();
-		
+
 		const partGeom: BufferGeometry = new PlaneGeometry(0.05, 0.05);
 		const partMesh: InstancedMesh = new InstancedMesh(partGeom, partMat, nbParticles);
 		partMesh.instanceMatrix.setUsage(DynamicDrawUsage);
 		partMesh.frustumCulled = false;
 		this.scene.add(partMesh);
 
-		await this.renderer.computeAsync(this.initParticlesCp);
+		await this.renderer.computeAsync(this.initParticlesCp); // initializes the particles
 
 	}
 
@@ -215,21 +214,19 @@ export class LinkedParticles implements IAnimatedElement {
 		linkMat.blending = AdditiveBlending;
 		linkMat.colorNode = color(0xffffff);
 		linkMat.opacityNode = tslFn(() => {
-			const part = storage(vertSBA, 'vec4', vertSBA.count).toAttribute();
-			const o = part.w;
-			const p = part.xyz;
 
-			const camFac = float(1.0).toVar();			
-			const camDist = p.sub(varying(cameraPosition).xyz).lengthSq();
+			const part = storage(vertSBA, 'vec4', vertSBA.count).toAttribute();
+			const o = part.w; // opacity is linked to the particle lifetime, stored in the w component its position
+			const p = part.xyz;
+			const camFac = float(1.0).toVar();
+			const camDist = p.sub(varying(cameraPosition).xyz).lengthSq(); // not entirely sure why I need to use varying here and not in the other
 			If(camDist.lessThan(this.uCamFadeThreshold), () => {
 				camFac.assign(camDist.div(this.uCamFadeThreshold).pow(3.0)); // fades out when particles are too close to the camera
 			});
 
-			return o.mul(camFac); // opacity is linked to the particle lifetime, stored in the w component its position
+			return o.mul(camFac);
 
 		})();
-
-		
 
 		const mesh: Mesh = new Mesh(geom, linkMat);
 		mesh.frustumCulled = false;
@@ -241,20 +238,20 @@ export class LinkedParticles implements IAnimatedElement {
 
 		const { nbParticles, partPositions, partVelocities, uTimeScale, uParticleLifetime } = this;
 		const { turbFrequency, turbOctaves, turbAmplitude, turbLacunarity, turbGain } = this;
-		
+
 		const position = partPositions.element(instanceIndex).xyz;
 		const velocity = partVelocities.element(instanceIndex).xyz;
 		const life = partPositions.element(instanceIndex).w;
 
 		const dt = timerDelta(0.1).mul(uTimeScale);
-		
+
 		If(life.greaterThan(0.0), () => {
 
 			// first we update the particles positions and velocities
 			// velocity comes from a turbulence field, and is multiplied by the particle lifetime so that it slows down over time
 			const vel = mx_fractal_noise_vec3(position.mul(turbFrequency), turbOctaves, turbLacunarity, turbGain, turbAmplitude).mul(life.add(.01));
 			velocity.addAssign(vel);
-			velocity.mulAssign(this.turbFriction.oneMinus() );
+			velocity.mulAssign(this.turbFriction.oneMinus());
 			position.assign(position.add(velocity.mul(dt)));
 			life.subAssign(dt.mul(float(1.0).div(uParticleLifetime))); // update lifetime, particle dies when it reaches 0
 
@@ -297,7 +294,7 @@ export class LinkedParticles implements IAnimatedElement {
 			const lColors = storage(this.linksColorsSBA, "vec4", this.linksColorsSBA.count);
 			const lIndex1 = instanceIndex.mul(8); // start index for the first quad
 			const lIndex2 = lIndex1.add(4); // start index for the second quad
-			
+
 			// The quad are created with their "width" over y and that's it.
 			// at some point I had some normals here too
 			const lw = this.uLinksWidth;
@@ -327,7 +324,7 @@ export class LinkedParticles implements IAnimatedElement {
 			// store the minimum lifetime of the closest particles in the w component of the positions for opacity in the fragment shader
 			const l1 = max(0.0, min(closestLife1, life)).pow(0.8); // pow is here to apply a slight curve to the opacity
 			const l2 = max(0.0, min(closestLife2, life)).pow(0.8);
-			
+
 			loop({ type: 'uint', start: 0, end: 4, condition: '<' }, ({ i }) => {
 				lColors.element(lIndex1.add(i)).xyz.assign(col);
 				lColors.element(lIndex2.add(i)).xyz.assign(col);
@@ -341,7 +338,7 @@ export class LinkedParticles implements IAnimatedElement {
 
 	getInstanceColor = tslFn(([i_immutable]) => {
 		// color is based on the particle index, time, and a noise function 
-		return color(0x0000FF).hue( this.uColorOffset.add(mx_fractal_noise_float(i_immutable.toFloat().mul(0.1), 2, 2.0, 0.5, this.uColorVariance)));
+		return color(0x0000FF).hue(this.uColorOffset.add(mx_fractal_noise_float(i_immutable.toFloat().mul(0.1), 2, 2.0, 0.5, this.uColorVariance)));
 	});
 
 	uSpawnIndex = uniform(0);
@@ -350,12 +347,13 @@ export class LinkedParticles implements IAnimatedElement {
 	uSpawnPositionBefore = uniform(vec3(0.0));
 	// spawns particles at the cursor position, with a bit of randomness, for a number of particles defined by uSpawnCursorNb, "Spawn rate" in the GUI
 	spawnParticlesCursorCp = tslFn(() => {
-		
+
 		const { partPositions, partVelocities, uSpawnIndex, nbParticles } = this;
-		const pIndex = uSpawnIndex.add(instanceIndex.remainder(nbParticles)).toInt();
+		const pIndex = uSpawnIndex.add(instanceIndex).remainder(nbParticles).toInt(); // position in buffer
 		const position = partPositions.element(pIndex).xyz;
 		const velocity = partVelocities.element(pIndex).xyz;
 		const life = partPositions.element(pIndex).w;
+
 		life.assign(1.0); // sets it alive
 
 		// random spherical direction
@@ -374,7 +372,7 @@ export class LinkedParticles implements IAnimatedElement {
 
 	})().compute(this.uSpawnCursorNb.value);
 
-	initBG() {
+	createBackground() {
 
 		// a large icosaedron with a hexagonal pattern
 		const geom: BufferGeometry = new IcosahedronGeometry(100, 1);
@@ -392,8 +390,9 @@ export class LinkedParticles implements IAnimatedElement {
 			dcol.assign(mix(color(0x050505), icol.mul(1.5), this.cubicPulse(0.5, 0.02, n2)).pow(2.0));
 			const pattern = this.hexagonPattern(vec2(phi, theta).mul(10.0)); // the hexagonal cells, 2d id in xy and distance in z
 			const n = pattern.z;
-			const lit = smoothstep( 0.8, 1.0, mx_fractal_noise_float( pattern.xy.add( timerGlobal(.25) ), 2, 2.0, 0.5, 0.5).add(0.5) );
-			return mix(dcol, mix(dcol.mul(0.5), mix( color(0x151515), icol, lit), smoothstep(0.02, 0.03, n)), smoothstep(0.0, 0.02, n));
+			const lit = smoothstep(0.8, 1.0, mx_fractal_noise_float(pattern.xy.add(timerGlobal(.25)), 2, 2.0, 0.5, 0.5).add(0.5)); //  hex cell lights up
+			// mixing it all together
+			return mix(dcol, mix(dcol.mul(0.5), mix(color(0x151515), icol, lit), smoothstep(0.02, 0.03, n)), smoothstep(0.0, 0.02, n));
 		})();
 
 		mat.side = BackSide; // only the inside
@@ -405,22 +404,26 @@ export class LinkedParticles implements IAnimatedElement {
 	bloomPass;
 	initPost() {
 
+		const cornerDist = viewportTopLeft.distance(.5).mul(2.0).clamp();
 		const scenePass = pass(this.scene, this.camera);
 		const scenePassColor = scenePass.getTextureNode('output');
-		const blurFac = viewportTopLeft.distance(.5).mul(2.0).clamp().pow(8.0).mul(this.uUseBlur);
+		// blurring the sides
+		const blurFac = cornerDist.pow(8.0).mul(this.uUseBlur);
 		const blurred = scenePassColor.gaussianBlur(blurFac);
+
+		// bloom, with params in GUI
 		const bloomPass = bloom(scenePass, 1.0, .25, 0.1);
 		this.bloomPass = bloomPass;
 
 		// big rgb shift on the side
 		const shift = rgbShift(blurred.add(bloomPass));
-		shift.amount = viewportTopLeft.distance(.5).mul(2.0).clamp().pow(4.0).mul(0.004).mul( this.uUseRGBShift);
+		shift.amount = cornerDist.pow(4.0).mul(0.004).mul(this.uUseRGBShift);
 		shift.angle = atan2(viewportTopLeft.y.sub(.5), viewportTopLeft.x.sub(.5));
-				
-		const anamorphic = scenePass.anamorphic( 2.0, 5.0, 32);
-		anamorphic.resolution = new Vector2( 0.2, 0.2);
-		this.post.outputNode = shift.add( anamorphic.mul( 0.2 ).mul( this.uUseAnamorphic )).fxaa();
-		
+
+		// anamorphic "lens flare"
+		const anamorphic = scenePass.anamorphic(2.0, 5.0, 32);
+		anamorphic.resolution = new Vector2(0.2, 0.2);
+		this.post.outputNode = shift.add(anamorphic.mul(0.2).mul(this.uUseAnamorphic)).fxaa();
 	}
 
 
@@ -438,11 +441,38 @@ export class LinkedParticles implements IAnimatedElement {
 		this.uSpawnPosition.value.y = MathUtils.lerp(this.uSpawnPosition.value.y, this.pointerHandler.uPointer.value.y, .1);
 		this.uSpawnPosition.value.z = MathUtils.lerp(this.uSpawnPosition.value.z, this.pointerHandler.uPointer.value.z, .1);
 
+		// rotating colors
 		this.uColorOffset.value += dt * this.uColorRotationSpeed.value;
 
 	}
 
-	/** transpiled utilities, from Inigo Quilez */
+	////////////////////////////////////////////////////////////////////////////////////
+	/** transpiled utilities, from or inspired by Inigo Quilez */
+	cubicPulse = /*#__PURE__*/ tslFn(([c_immutable, w_immutable, x_immutable]) => {
+
+		const x = float(x_immutable).toVar();
+		const w = float(w_immutable).toVar();
+		const c = float(c_immutable).toVar();
+		x.assign(abs(x.sub(c)));
+
+		If(x.greaterThan(w), () => {
+			return 0.0;
+		});
+
+		x.divAssign(w);
+
+		return sub(1.0, x.mul(x).mul(sub(3.0, mul(2.0, x))));
+
+	}).setLayout({
+		name: 'cubicPulse',
+		type: 'float',
+		inputs: [
+			{ name: 'c', type: 'float' },
+			{ name: 'w', type: 'float' },
+			{ name: 'x', type: 'float' }
+		]
+	});
+
 	sdHexagon = tslFn(([p_immutable, r_immutable]) => {
 
 		const r = float(r_immutable).toVar();
@@ -474,7 +504,7 @@ export class LinkedParticles implements IAnimatedElement {
 		const cb = float(step(2.0, v)).toVar();
 		const ma = vec2(step(pf.xy, pf.yx)).toVar();
 		const e = float(dot(ma, sub(1.0, pf.yx).add(ca.mul(pf.x.add(pf.y.sub(1.0)))).add(cb.mul(pf.yx.sub(mul(2.0, pf.xy)))))).toVar();
-		return vec3(pi.add(ca).sub(cb.mul(ma)),e);
+		return vec3(pi.add(ca).sub(cb.mul(ma)), e);
 
 	}).setLayout({
 		name: 'hexagonPattern',
@@ -484,30 +514,7 @@ export class LinkedParticles implements IAnimatedElement {
 		]
 	});
 
-	cubicPulse = /*#__PURE__*/ tslFn(([c_immutable, w_immutable, x_immutable]) => {
-
-		const x = float(x_immutable).toVar();
-		const w = float(w_immutable).toVar();
-		const c = float(c_immutable).toVar();
-		x.assign(abs(x.sub(c)));
-
-		If(x.greaterThan(w), () => {
-			return 0.0;
-		});
-
-		x.divAssign(w);
-
-		return sub(1.0, x.mul(x).mul(sub(3.0, mul(2.0, x))));
-
-	}).setLayout({
-		name: 'cubicPulse',
-		type: 'float',
-		inputs: [
-			{ name: 'c', type: 'float' },
-			{ name: 'w', type: 'float' },
-			{ name: 'x', type: 'float' }
-		]
-	});
+	
 
 
 }

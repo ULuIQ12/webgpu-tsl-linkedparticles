@@ -5,6 +5,7 @@ import IntroModal from './components/IntroModal';
 import { brightness, cameraIcon, closeCross, crosshairIcon, fxIcon, githubIcon, globeIcon, moonIcon, questionIcon, saveIcon, sunIcon, tools, twitterIcon, uluLogo, uploadIcon } from './components/GFX';
 import { Root } from './lib/Root';
 import InfoModal from './components/InfoModal';
+import WebGPU from 'three/examples/jsm/capabilities/WebGPU.js';
 
 
 
@@ -12,6 +13,11 @@ function App() {
 
 	const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 	const [isUIHidden, setIsUIHidden] = useState(false);
+
+	const [hasWebGPU, setHasWebGPU] = useState(false);
+    useEffect(() => {
+        setHasWebGPU(WebGPU.isAvailable())
+    }, []);
 
 	const closedButtons = useRef<HTMLDivElement>(null);
 	const sideButtonsRef = useRef<HTMLDivElement>(null);
@@ -133,6 +139,12 @@ function App() {
 			<InfoModal isOpen={infoModalOpen} onClose={handleInfoClose} />
 			<IntroModal />
 			*/}
+			{ !hasWebGPU && 
+				<div className=''>
+					<div className="pb-2"><a className="link" href="https://gpuweb.github.io/gpuweb/">WebGPU</a> is not available on your browser and this page requires compatibility</div>
+					<div className="pb-2">Please try with a WebGPU compatible browser.</div>
+				</div>
+			}
 			<div className='fixed bottom-4 right-8'>
 				<div ref={logoRef}>
 					<button onClick={handlePromoToggle}>{uluLogo()}</button>
